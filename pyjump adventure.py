@@ -1,6 +1,7 @@
 import pygame
 import tkinter as tk
 from tkinter import messagebox
+
 import random
 import json
 import os
@@ -10,11 +11,13 @@ current_level = 1
 max_levels = 50
 player_health = 100
 max_health = 100
-power_active = False
+power_active = False                                 
 power_timer = 0
 power_duration = 15 * 60  # 15 seconds (60 FPS)
 coins_for_power = 5
 coins_collected = 0
+
+selected_character = "mario"  # Options: "mario", "doraemon", "heman"
 
 # Save/load progress functions
 def save_progress():
@@ -135,7 +138,7 @@ def run_game():
     WIDTH = info.current_w
     HEIGHT = info.current_h
     window = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
-    pygame.display.set_caption(f"PyJump Adventure - Level {current_level}")
+    pygame.display.set_caption(f"Jump Quest - Level {current_level}")
 
     # Colors
     WHITE = (255, 255, 255)
@@ -159,18 +162,20 @@ def run_game():
     LIGHT_PURPLE = (221, 160, 221)
 
     # Player properties
-    player_width = 30
-    player_height = 40
+    player_width = 40
+    player_height = 50
     player_x = 50
     player_y = HEIGHT - player_height - 10
     player_speed = 6  # Balanced speed
-    jump_height = HEIGHT // 50  # Set to exactly 2% of screen height
+    # Calculate jump_height so player can jump from ground to top border
+    max_jump_height = (HEIGHT - 20 - player_height) - 20
+    jump_height = int((2 * max_jump_height / 0.5) ** 0.5)  # Derived from jump formula
     is_jumping = False
     jump_count = jump_height
     score = 0
     invincible_timer = 0
     on_ground = False
-    gravity = 0.5  # Reduced gravity for longer air time to reach platforms
+    gravity = 1.0  # Increased gravity for even faster falling speed
 
     # Reset power-up variables for new level
     power_active = False
@@ -181,39 +186,75 @@ def run_game():
     def get_level_properties(level):
         """Generate level properties based on level number"""
         
-        # Scale difficulty with level
-        base_platforms = 3 + (level // 2) + (level // 5)
+        # Scale difficulty with level - adjust platforms after level 7
+        if level <= 5:
+            base_platforms = 3 + (level // 2) + (level // 5)
+        elif level <= 7:
+            base_platforms = 8 + (level // 2) + (level // 4)
+        else:
+            base_platforms = 5 + (level // 4)  # Fewer platforms after level 7
         base_coins = 5 + level * 3
         base_obstacles = 2 + level + (level // 3)
         base_enemies = level // 2 + (level // 4)
         base_health_pickups = 2 + (level // 4)
         
-        # Background color gets darker with level
-        if level <= 3:
-            background_color = LIGHT_BLUE
-        elif level <= 8:
-            background_color = (20, 20, 40)
-        elif level <= 12:
-            background_color = (40, 20, 20)
-        elif level <= 16:
-            background_color = (20, 20, 20)
-        elif level <= 25:
-            background_color = (10, 10, 10)
-        elif level <= 35:
-            background_color = (5, 5, 5)
-        elif level <= 45:
-            background_color = (2, 2, 2)
-        else:
-            background_color = (0, 0, 0)
+        # Smooth background color transition
+        def lerp(a, b, t):
+            return int(a + (b - a) * t)
+        max_levels = 50  # or use the global max_levels if available
+        start_color = (135, 206, 235)  # Light blue
+        end_color = (10, 10, 20)       # Intense dark
+        t = min(1.0, (level - 1) / (max_levels - 1))  # 0.0 at level 1, 1.0 at max level
+        background_color = (
+            lerp(start_color[0], end_color[0], t),
+            lerp(start_color[1], end_color[1], t),
+            lerp(start_color[2], end_color[2], t)
+        )
         
-        # Generate platforms
+        # Generate platforms with better distribution to fill right side
         platforms = []
         for i in range(base_platforms):
-            platform_width = max(40, 120 - level * 6)
+            if level > 7:
+                gap_factor = 6.0  # Even larger space between platforms after level 7
+                platform_x = 50 + int(i * (WIDTH - 100) // (base_platforms * gap_factor))
+                platform_width = max(40, 120 - level * 7)  # Slightly narrower for more space
+            else:
+                platform_x = 50 + i * (WIDTH - 100) // base_platforms
+                platform_width = max(40, 120 - level * 6)
             platform_height = 20
-            platform_x = 50 + i * (WIDTH - 100) // base_platforms
-            platform_y = HEIGHT - 200 - (i * 50) - (level * 15)
+            
+            # Better platform distribution to fill the entire screen width
+            if level <= 10:
+                # For levels 1-10, use original spacing
+                platform_x = 50 + i * (WIDTH - 100) // base_platforms
+                platform_y = HEIGHT - 200 - (i * 35) - (level * 10)
+            else:
+                # For levels 11+, ensure platforms cover the full width and don't go off-screen
+                platform_x = 50 + i * (WIDTH - 150) // (base_platforms - 1)  # Better distribution
+                platform_y = HEIGHT - 200 - (i * 30) - (level * 8)  # Reduced height increase
+                
+                # Ensure the last platform is within screen bounds
+                if i == base_platforms - 1:  # Last platform
+                    platform_x = min(platform_x, WIDTH - 200)  # Keep within screen
+                    platform_y = max(platform_y, 100)  # Don't go too high
+            
             platforms.append([platform_x, platform_y, platform_width, platform_height])
+        
+        # Add extra platforms for levels 11+ to fill right side space
+        if level > 10:
+            extra_platforms = level // 3  # Add more platforms for higher levels
+            for i in range(extra_platforms):
+                # Add platforms in the right side area
+                extra_x = WIDTH - 300 + (i * 80)  # Start from right side
+                extra_y = HEIGHT - 250 - (i * 40) - (level * 5)
+                extra_width = max(30, 80 - level * 3)
+                extra_height = 15
+                
+                # Ensure extra platforms are within screen bounds
+                extra_x = max(50, min(extra_x, WIDTH - 150))
+                extra_y = max(100, min(extra_y, HEIGHT - 150))
+                
+                platforms.append([extra_x, extra_y, extra_width, extra_height])
         
         # Generate coins
         coins = []
@@ -229,16 +270,16 @@ def run_game():
                 coin_y = HEIGHT - 300 - (i * 30) % 200
             coins.append([coin_x, coin_y])
         
-        # Generate obstacles
+        # Generate obstacles with better distribution
         obstacles = []
         ground_obstacles = base_obstacles // 2
         platform_obstacles = base_obstacles - ground_obstacles
         
-        # Ground obstacles
+        # Ground obstacles - spread across full width
         for i in range(ground_obstacles):
             obstacle_width = 30 + level * 3
             obstacle_height = 40 + level * 4
-            obstacle_x = 100 + (i * 200) % (WIDTH - 200)
+            obstacle_x = 100 + (i * (WIDTH - 300) // max(1, ground_obstacles - 1))  # Better distribution
             obstacle_y = HEIGHT - obstacle_height - 10
             obstacles.append([obstacle_x, obstacle_y, obstacle_width, obstacle_height])
         
@@ -252,32 +293,44 @@ def run_game():
                 obstacle_y = platform[1] - obstacle_height - 5
                 obstacles.append([obstacle_x, obstacle_y, obstacle_width, obstacle_height])
         
-        # Generate enemies
-        enemies = []
-        ground_enemies = base_enemies // 2
-        platform_enemies = base_enemies - ground_enemies
+        # Add extra obstacles for levels 11+ to fill right side space
+        if level > 10:
+            extra_obstacles = level // 2  # Add more obstacles for higher levels
+            for i in range(extra_obstacles):
+                # Add obstacles in the right side area
+                extra_width = 25 + level * 2
+                extra_height = 30 + level * 3
+                extra_x = WIDTH - 400 + (i * 60)  # Spread across right side
+                extra_y = HEIGHT - extra_height - 10
+                
+                # Ensure extra obstacles are within screen bounds
+                extra_x = max(50, min(extra_x, WIDTH - 100))
+                
+                obstacles.append([extra_x, extra_y, extra_width, extra_height])
         
-        # Ground enemies
-        for i in range(ground_enemies):
+        # Generate enemies with better distribution
+        enemies = []
+        
+        # Enemies increase with level - making game tougher
+        num_enemies = 2 + (level // 3)  # More enemies as level increases
+        for i in range(num_enemies):
             enemy_width = 30
             enemy_height = 40
-            enemy_x = 150 + (i * 300) % (WIDTH - 200)
-            enemy_y = HEIGHT - enemy_height - 10
-            enemy_speed = 2 + level + (level // 2)
-            enemies.append([enemy_x, enemy_y, enemy_width, enemy_height, enemy_speed, 1])  # 1 = direction
+            enemy_x = random.randint(50, WIDTH - 100)
+            enemy_y = random.randint(120, HEIGHT - 220)
+            enemy_speed = 1 + (level // 3)
+            # Assign movement type based on level
+            if level <= 3:
+                move_type = "static"
+            elif level <= 7:
+                move_type = random.choice(["horizontal", "vertical"])
+            elif level <= 15:
+                move_type = random.choice(["horizontal", "vertical", "dynamic"])
+            else:
+                move_type = "dynamic"
+            enemies.append([enemy_x, enemy_y, enemy_width, enemy_height, enemy_speed, 1, move_type])
         
-        # Platform enemies
-        for i in range(platform_enemies):
-            if i < len(platforms):
-                platform = platforms[i]
-                enemy_width = 25
-                enemy_height = 35
-                enemy_x = platform[0] + 10
-                enemy_y = platform[1] - enemy_height - 5
-                enemy_speed = 1 + level + (level // 3)
-                enemies.append([enemy_x, enemy_y, enemy_width, enemy_height, enemy_speed, 1, platform[0], platform[0] + platform[2]])  # Platform bounds
-        
-        # Generate health pickups (fewer in higher levels)
+        # Generate health pickups (fewer in higher levels) - generate first
         health_pickups = []
         for i in range(base_health_pickups):
             if i < len(platforms):
@@ -286,11 +339,17 @@ def run_game():
                 pickup_y = platform[1] - 25
                 health_pickups.append([pickup_x, pickup_y])
         
-        # Generate golden bucket - always on the last platform (final step)
+
+        
+        # Generate golden bucket - ensure it's always on screen and on the last platform
         if platforms:  # If there are platforms
             last_platform = platforms[-1]  # Get the last platform
             bucket_x = last_platform[0] + (last_platform[2] // 2) - 15  # Center on platform
             bucket_y = last_platform[1] - 25  # Slightly above platform
+            
+            # Ensure bucket is within screen bounds
+            bucket_x = max(50, min(bucket_x, WIDTH - 100))  # Keep within screen width
+            bucket_y = max(50, min(bucket_y, HEIGHT - 100))  # Keep within screen height
         else:  # Fallback if no platforms
             bucket_x = WIDTH - 150
             bucket_y = HEIGHT - 100
@@ -301,7 +360,12 @@ def run_game():
         guardian_height = 50
         guardian_x = bucket_x - 100  # Start to the left of bucket
         guardian_y = bucket_y - 60   # Slightly above bucket
-        guardian_speed = 3 + level + (level // 2)
+        
+        # Ensure guardian is within screen bounds
+        guardian_x = max(50, min(guardian_x, WIDTH - 100))
+        guardian_y = max(50, min(guardian_y, HEIGHT - 100))
+        
+        guardian_speed = 2 + (level // 3)  # Slower speed
         guardian_enemy = [guardian_x, guardian_y, guardian_width, guardian_height, guardian_speed, 1]  # Full screen patrol
         
         return {
@@ -360,6 +424,53 @@ def run_game():
         # Mario's arms (skin color)
         pygame.draw.rect(window, (255, 200, 150), (x - 5, y + height//3, 8, height//4))
         pygame.draw.rect(window, (255, 200, 150), (x + width - 3, y + height//3, 8, height//4))
+
+    # Doraemon character drawing function
+    def draw_doraemon(x, y, width, height):
+        # Draw power-up glow effect
+        if power_active:
+            # Purple glow around Doraemon
+            glow_size = 5
+            pygame.draw.ellipse(window, LIGHT_PURPLE, (x - glow_size, y - glow_size, width + glow_size*2, height + glow_size*2))
+            pygame.draw.ellipse(window, PURPLE, (x - glow_size, y - glow_size, width + glow_size*2, height + glow_size*2), 2)
+        
+        # Body (blue)
+        pygame.draw.ellipse(window, (0, 162, 232), (x, y + height//4, width, height//2))
+        # Head (white face, blue outline)
+        pygame.draw.ellipse(window, (0, 162, 232), (x, y, width, height//2))
+        pygame.draw.ellipse(window, (255, 255, 255), (x + 4, y + 4, width - 8, height//2 - 8))
+        # Eyes
+        pygame.draw.circle(window, (255, 255, 255), (x + width//3, y + height//6), 5)
+        pygame.draw.circle(window, (255, 255, 255), (x + 2*width//3, y + height//6), 5)
+        pygame.draw.circle(window, (0, 0, 0), (x + width//3, y + height//6), 2)
+        pygame.draw.circle(window, (0, 0, 0), (x + 2*width//3, y + height//6), 2)
+        # Nose (red)
+        pygame.draw.circle(window, (255, 0, 0), (x + width//2, y + height//4), 3)
+        # Collar (red)
+        pygame.draw.rect(window, (255, 0, 0), (x, y + height//2 - 4, width, 4))
+
+    # He-Man character drawing function
+    def draw_heman(x, y, width, height):
+        # Draw power-up glow effect
+        if power_active:
+            # Purple glow around He-Man
+            glow_size = 5
+            pygame.draw.rect(window, LIGHT_PURPLE, (x - glow_size, y - glow_size, width + glow_size*2, height + glow_size*2))
+            pygame.draw.rect(window, PURPLE, (x - glow_size, y - glow_size, width + glow_size*2, height + glow_size*2), 2)
+        
+        # Body (blue armor)
+        pygame.draw.rect(window, (0, 100, 200), (x, y + height//3, width, height//2))
+        # Head (skin color)
+        pygame.draw.ellipse(window, (255, 200, 150), (x, y, width, height//3))
+        # Hair (brown)
+        pygame.draw.ellipse(window, (139, 69, 19), (x - 2, y, width + 4, height//3))
+        # Eyes
+        pygame.draw.circle(window, (0, 0, 0), (x + width//3, y + height//6), 2)
+        pygame.draw.circle(window, (0, 0, 0), (x + 2*width//3, y + height//6), 2)
+        # Mustache
+        pygame.draw.rect(window, (139, 69, 19), (x + width//4, y + height//3 - 2, width//2, 4))
+        # Cape (red)
+        pygame.draw.rect(window, (200, 0, 0), (x + width - 5, y + height//3, 8, height//2))
 
     # Proper red heart drawing function
     def draw_heart(x, y, size=15):
@@ -426,6 +537,8 @@ def run_game():
         pygame.draw.polygon(window, (100, 0, 0), [(x + 5, y), (x + 10, y - 8), (x + 15, y)])
         pygame.draw.polygon(window, (100, 0, 0), [(x + 15, y), (x + 20, y - 8), (x + 25, y)])
 
+
+
     # Game loop
     running = True
     clock = pygame.time.Clock()
@@ -486,22 +599,43 @@ def run_game():
             player_y = HEIGHT - 20 - player_height
             on_ground = True
             is_jumping = False
+        
+        # Upper border collision
+        if player_y <= 20:
+            player_y = 20
+            is_jumping = False
 
-        # Update enemies with platform patrolling
+        # Update enemies - all enemies can move anywhere on screen
         for enemy in enemies:
-            if len(enemy) == 8:  # Platform enemy with patrol bounds
-                enemy[0] += enemy[4]  # Move enemy
-                if enemy[0] <= enemy[6] or enemy[0] >= enemy[7]:  # Check platform bounds
-                    enemy[4] *= -1  # Reverse direction
-            else:  # Ground enemy (6 elements)
-                enemy[0] += enemy[4]  # Move enemy
+            move_type = enemy[6] if len(enemy) > 6 else "horizontal"
+            if move_type == "static":
+                pass  # No movement
+            elif move_type == "horizontal":
+                enemy[0] += enemy[4]  # Move horizontally
                 if enemy[0] <= 0 or enemy[0] >= WIDTH - enemy[2]:
-                    enemy[4] *= -1  # Reverse direction
+                    enemy[4] *= -1
+            elif move_type == "vertical":
+                enemy[1] += enemy[4]  # Move vertically
+                if enemy[1] <= 20 or enemy[1] >= HEIGHT - 20 - enemy[3]:
+                    enemy[4] *= -1
+            elif move_type == "dynamic":
+                # Zigzag: move horizontally and vertically, change vertical direction randomly
+                enemy[0] += enemy[4]
+                if random.randint(0, 1) == 0:
+                    enemy[1] += enemy[4]
+                else:
+                    enemy[1] -= enemy[4]
+                if enemy[0] <= 0 or enemy[0] >= WIDTH - enemy[2]:
+                    enemy[4] *= -1
+                if enemy[1] <= 20 or enemy[1] >= HEIGHT - 20 - enemy[3]:
+                    enemy[4] *= -1
 
         # Update guardian enemy
         guardian_enemy[0] += guardian_enemy[4]  # Move guardian
         if guardian_enemy[0] <= 0 or guardian_enemy[0] >= WIDTH - guardian_enemy[2]:
             guardian_enemy[4] *= -1  # Reverse direction
+        
+
 
         # Check collision with obstacles
         for obstacle in obstacles:
@@ -533,6 +667,8 @@ def run_game():
                 if player_health <= 0:
                     game_over_screen(window, WIDTH, HEIGHT, score, current_level)
                     return
+            
+
 
         # Update invincibility timer
         if invincible_timer > 0:
@@ -583,7 +719,12 @@ def run_game():
                         run_game()  # Start next level
                         return
                 elif result == "menu":
-                    # Return to level selection
+                    # Smoothly move to the level selection interface without closing/recreating root
+                    pygame.display.iconify()  # Minimize the Pygame window
+                    try:
+                        show_level_selection()
+                    except Exception:
+                        start_game()
                     return
                 elif result == "quit":
                     return
@@ -593,6 +734,9 @@ def run_game():
 
         # Draw
         window.fill(background_color)
+        
+        # Draw upper border
+        pygame.draw.rect(window, DARK_GREEN, (0, 0, WIDTH, 20))
         
         # Draw ground
         pygame.draw.rect(window, DARK_GREEN, (0, HEIGHT - 20, WIDTH, 20))
@@ -618,6 +762,8 @@ def run_game():
         
         # Draw guardian enemy
         draw_guardian_enemy(guardian_enemy[0], guardian_enemy[1], guardian_enemy[2], guardian_enemy[3])
+        
+
         
         # Draw golden bucket (level goal)
         draw_bucket(bucket[0], bucket[1])
@@ -646,7 +792,12 @@ def run_game():
         if invincible_timer > 0 and invincible_timer % 10 < 5:
             pass  # Don't draw player when invincible (flashing effect)
         else:
-            draw_mario(player_x, player_y, player_width, player_height)
+            if selected_character == "mario":
+                draw_mario(player_x, player_y, player_width, player_height)
+            elif selected_character == "doraemon":
+                draw_doraemon(player_x, player_y, player_width, player_height)
+            elif selected_character == "heman":
+                draw_heman(player_x, player_y, player_width, player_height)
         
         # Draw UI
         draw_ui(window, score, player_health, current_level)
@@ -827,7 +978,7 @@ def show_instructions():
                        "Game Features:\n"
                        "• 50 Levels with EXTREME difficulty progression\n"
                        "• Level selection with unlock system\n"
-                       "• Mario-like character with detailed design\n"
+                       "• Multiple characters to choose from\n"
                        "• Enhanced jumping - reach distant platforms\n"
                        "• Platforms to jump on and collect coins\n"
                        "• Health system - avoid enemies\n"
@@ -843,7 +994,11 @@ def show_instructions():
                        "• Fullscreen gameplay experience\n"
                        "• EXTREME difficulty scaling\n"
                        "• Fewer health pickups in higher levels\n"
-                       "• Goal on last platform - final challenge\n\n"
+                       "• Goal on last platform - final challenge\n"
+                                               "• After level 10: More platforms and obstacles fill right side\n"
+                        "• Enemies increase with level difficulty\n"
+                        "• Upper and lower borders limit movement\n"
+                        "• Golden bucket always stays within screen bounds\n\n"
                        "Objective:\n"
                        "• Use enhanced jumping to reach the final platform\n"
                        "• Collect the golden bucket on the last step\n"
@@ -852,17 +1007,127 @@ def show_instructions():
                        "• Maintain your health using pickups\n"
                        "• Get the highest score possible!")
 
+def show_character_selection():
+    """Show character selection window"""
+    global selected_character
+    
+    # Create character selection window
+    char_window = tk.Toplevel(root)
+    char_window.title("Character Selection")
+    char_window.geometry("500x600")
+    char_window.configure(bg='#2c3e50')
+    char_window.resizable(False, False)
+    
+    # Center the window
+    char_window.update_idletasks()
+    x = (char_window.winfo_screenwidth() // 2) - (500 // 2)
+    y = (char_window.winfo_screenheight() // 2) - (600 // 2)
+    char_window.geometry(f"500x600+{x}+{y}")
+    
+    # Title
+    title_label = tk.Label(char_window, text="Choose Your Character", 
+                          font=("Arial Black", 20, "bold"), 
+                          bg='#2c3e50', fg='#e74c3c')
+    title_label.pack(pady=15)
+    
+    # Character frame with scrollbar
+    canvas = tk.Canvas(char_window, bg='#2c3e50', highlightthickness=0)
+    scrollbar = tk.Scrollbar(char_window, orient="vertical", command=canvas.yview)
+    char_frame = tk.Frame(canvas, bg='#2c3e50')
+    
+    char_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+    
+    canvas.create_window((0, 0), window=char_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    
+    canvas.pack(side="left", fill="both", expand=True, pady=15)
+    scrollbar.pack(side="right", fill="y")
+    
+    # Character options
+    characters = [
+        {
+            "name": "Mario",
+            "description": "Classic Nintendo hero\nRed overalls, blue shirt\nMustache and red cap\nBalanced character",
+            "color": "#e74c3c",
+            "value": "mario"
+        },
+        {
+            "name": "Doraemon",
+            "description": "Blue robotic cat\nWhite face, red nose\nRed collar and bell\nFriendly and helpful",
+            "color": "#3498db", 
+            "value": "doraemon"
+        },
+        {
+            "name": "He-Man",
+            "description": "Masters of the Universe hero\nBrown hair, muscular build\nBlue armor and red cape\nPowerful warrior",
+            "color": "#ff6b35",
+            "value": "heman"
+        }
+    ]
+    
+    # Create character buttons
+    for char in characters:
+        char_button_frame = tk.Frame(char_frame, bg='#34495e', relief="raised", bd=2)
+        char_button_frame.pack(pady=8, padx=20, fill="x")
+        
+        # Character name
+        name_label = tk.Label(char_button_frame, text=char["name"], 
+                            font=("Arial Black", 16, "bold"),
+                            bg='#34495e', fg=char["color"])
+        name_label.pack(pady=(10, 5))
+        
+        # Character description
+        desc_label = tk.Label(char_button_frame, text=char["description"],
+                            font=("Arial", 12), bg='#34495e', fg='#ecf0f1',
+                            justify="center")
+        desc_label.pack(pady=(0, 10))
+        
+        # Select button
+        select_button = tk.Button(char_button_frame, 
+                                text="SELECT" if selected_character != char["value"] else "SELECTED",
+                                command=lambda c=char["value"], w=char_window: select_character(c, w),
+                                font=("Arial", 12, "bold"),
+                                bg=char["color"], fg="white",
+                                activebackground=char["color"],
+                                activeforeground="white",
+                                relief="raised", bd=2,
+                                padx=20, pady=5)
+        select_button.pack(pady=(0, 10))
+        
+        # Highlight current selection
+        if selected_character == char["value"]:
+            char_button_frame.configure(bg='#2ecc71')
+            name_label.configure(bg='#2ecc71')
+            desc_label.configure(bg='#2ecc71')
+    
+    # Current selection info
+    current_label = tk.Label(char_window, 
+                           text=f"Current Character: {selected_character.title()}",
+                           font=("Arial", 14, "bold"),
+                           bg='#2c3e50', fg='#f39c12')
+    current_label.pack(side="bottom", pady=10)
+
+def select_character(character, window):
+    """Select a character and close the selection window"""
+    global selected_character
+    selected_character = character
+    messagebox.showinfo("Character Selected", f"You have selected {character.title()}!")
+    window.destroy()
+
 # Create Tkinter window
 root = tk.Tk()
-root.title("PyJump Adventure - Enhanced Edition")
-root.geometry("600x500")
+root.title("Jump Quest - Enhanced Edition")
+root.geometry("600x600")
 root.configure(bg="#2C3E50")  # Dark blue background
 
 # Center the window on screen
 root.update_idletasks()
 x = (root.winfo_screenwidth() // 2) - (600 // 2)
-y = (root.winfo_screenheight() // 2) - (500 // 2)
-root.geometry(f"600x500+{x}+{y}")
+y = (root.winfo_screenheight() // 2) - (600 // 2)
+root.geometry(f"600x600+{x}+{y}")
 
 # Main frame
 main_frame = tk.Frame(root, bg="#2C3E50", padx=40, pady=40)
@@ -870,7 +1135,7 @@ main_frame.pack(expand=True, fill="both")
 
 # Title with enhanced styling
 title_label = tk.Label(main_frame, 
-                      text="PyJump Adventure", 
+                      text="Jump Quest", 
                       font=("Arial Black", 32, "bold"),
                       fg="#E74C3C",  # Red color
                       bg="#2C3E50")
@@ -878,15 +1143,15 @@ title_label.pack(pady=(0, 30))
 
 # Subtitle
 subtitle_label = tk.Label(main_frame,
-                         text="Enhanced Edition - 20 Levels",
+                         text="Enhanced Edition - 50 Levels",
                          font=("Arial", 16, "italic"),
                          fg="#ECF0F1",  # Light gray
                          bg="#2C3E50")
-subtitle_label.pack(pady=(0, 40))
+subtitle_label.pack(pady=(0, 30))
 
 # Button frame
 button_frame = tk.Frame(main_frame, bg="#2C3E50")
-button_frame.pack(pady=20)
+button_frame.pack(pady=15)
 
 # Start button with enhanced styling
 start_button = tk.Button(button_frame, 
@@ -920,9 +1185,25 @@ instructions_button = tk.Button(button_frame,
                               cursor="hand2")
 instructions_button.pack(pady=10)
 
+# Character Selection button
+character_button = tk.Button(button_frame,
+                              text="SELECT CHARACTER",
+                              command=show_character_selection,
+                              font=("Arial Black", 14, "bold"),
+                              fg="#FFFFFF",
+                              bg="#9B59B6",  # Purple color
+                              activebackground="#8E44AD",
+                              activeforeground="#FFFFFF",
+                              relief="raised",
+                              bd=3,
+                              padx=25,
+                              pady=12,
+                              cursor="hand2")
+character_button.pack(pady=10)
+
 # Instructions text with better formatting
 instructions_frame = tk.Frame(main_frame, bg="#34495E", relief="raised", bd=2)
-instructions_frame.pack(pady=30, fill="x", padx=20)
+instructions_frame.pack(pady=20, fill="x", padx=20)
 
 instructions_title = tk.Label(instructions_frame,
                             text="How to Play:",
@@ -941,12 +1222,16 @@ instructions_text = tk.Label(instructions_frame,
                                 "• Collect the golden bucket to win level\n"
                                 "• Guardian enemy protects the bucket\n"
                                 "• Level selection with unlock system\n"
-                                "• 20 levels with EXTREME difficulty\n"
+                                "• 50 levels with EXTREME difficulty\n"
                                 "• Mario-like character with detailed design\n"
                                 "• Fullscreen gameplay experience\n"
                                 "• EXTREME difficulty scaling\n"
                                 "• Fewer health pickups in higher levels\n"
-                                "• Health system - stay alive!",
+                                "• Health system - stay alive!\n"
+                                "• After level 10: More platforms and obstacles\n"
+                                "• Enemies increase with level difficulty\n"
+                                "• Upper and lower borders limit movement\n"
+                                "• Golden bucket always stays on screen",
                            font=("Arial", 12),
                            fg="#ECF0F1",
                            bg="#34495E",
@@ -955,7 +1240,7 @@ instructions_text.pack(pady=(0, 15))
 
 # Footer
 footer_label = tk.Label(main_frame,
-                       text="© 2024 PyJump Adventure - Enhanced Edition",
+                       text="© 2024 Jump Quest - Enhanced Edition",
                        font=("Arial", 10),
                        fg="#95A5A6",  # Gray color
                        bg="#2C3E50")
